@@ -1,13 +1,14 @@
-name: Daily Stock Signal Scanner
+name: ML Batch Trading (Train Model)
 
 on:
-  schedule:
-    - cron: '15 10 * * 1-5' # 15:45 IST Monday through Friday
-  workflow_dispatch:
+  workflow_dispatch: # Allows manual triggering from the GitHub UI
 
 jobs:
-  scan:
+  data-build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7] # 8 parallel runners
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -20,11 +21,50 @@ jobs:
       - name: Install Dependencies
         run: pip install yfinance pandas numpy scikit-learn joblib pyarrow
 
-      - name: Run Daily Scanner
-        run: python daily_scanner.py
+      - name: Build Data Shard
+        run: python data_builder.py
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+          TOTAL_SHARDS: 8
 
-      - name: Upload Daily Signals Artifact
+      - name: Upload Shard Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: daily-signals
-          path: artifacts/daily_signals/today_signals.csv
+          name: data-shard-${{ matrix.shard }}
+          path: artifacts/data_shards/shard_${{ matrix.shard }}.parquet
+
+  train-universal-model:
+    needs: data-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to push the model back to the repository
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install yfinance pandas numpy scikit-learn joblib pyarrow
+
+      - name: Download all data shards
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/data_shards/
+          pattern: data-shard-*
+          merge-multiple: true
+
+      - name: Train Multi-Algorithm Ensemble
+        run: python universal_trainer.py
+
+      - name: Commit and Push Trained Model
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add artifacts/universal_model/universal_strategy.joblib
+          git add artifacts/universal_model/backtest_leaderboard.csv
+          git commit -m "Auto-update trained universal model and leaderboard" || echo "No changes to commit"
+          git push
