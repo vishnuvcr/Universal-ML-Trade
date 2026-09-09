@@ -1,0 +1,72 @@
+name: Universal ML NSE Backtest
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 6'
+
+jobs:
+  run-data-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false 
+      matrix:
+        shard_index: [0, 1, 2, 3, 4, 5, 6, 7]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install numpy pandas scikit-learn yfinance joblib pyarrow
+
+      - name: Run Data Download Shard ${{ matrix.shard_index }}
+        env:
+          SHARD_INDEX: ${{ matrix.shard_index }}
+          TOTAL_SHARDS: 8
+        run: python -u data_builder.py
+
+      - name: Upload Parquet Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-shard-${{ matrix.shard_index }}
+          path: artifacts/data_shards/
+          retention-days: 1
+
+  train-universal-model:
+    needs: run-data-build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install numpy pandas scikit-learn joblib pyarrow
+
+      - name: Download all data shards
+        uses: actions/download-artifact@v4
+        with:
+          pattern: data-shard-*
+          merge-multiple: true
+          path: artifacts/data_shards/
+
+      - name: Train Universal Model & Backtest
+        run: python -u universal_trainer.py
+
+      - name: Upload Universal Model & Leaderboard
+        uses: actions/upload-artifact@v4
+        with:
+          name: nse-universal-package
+          path: artifacts/universal_model/
+          retention-days: 14
