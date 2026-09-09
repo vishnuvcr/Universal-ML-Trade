@@ -1,0 +1,30 @@
+name: Daily Stock Signal Scanner
+
+on:
+  schedule:
+    - cron: '15 10 * * 1-5' # 15:45 IST Monday through Friday
+  workflow_dispatch: # Allows manual triggering for testing
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install yfinance pandas numpy scikit-learn joblib pyarrow
+
+      - name: Run Daily Scanner
+        run: python daily_scanner.py
+
+      - name: Upload Daily Signals Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-signals
+          path: artifacts/daily_signals/today_signals.csv
